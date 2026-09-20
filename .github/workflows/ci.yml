@@ -1,0 +1,8 @@
+# Placeholder — written in phase 9.
+name: ci
+on: [push, pull_request]
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "placeholder"

@@ -1,0 +1,10 @@
+# Placeholder — written in phase 9.
+name: release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "placeholder"
