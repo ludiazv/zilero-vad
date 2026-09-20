@@ -1,8 +1,20 @@
-# Placeholder — written in phase 9.
 name: ci
+
 on: [push, pull_request]
+
 jobs:
-  noop:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "placeholder"
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: fmt
+        run: zig fmt --check .
+      - name: test (debug, default cpu)
+        run: zig build test
+      - name: test (x86_64_v3)
+        run: zig build test -Dcpu=x86_64_v3
+      - name: cross-compile check (aarch64-linux)
+        run: zig build -Dtarget=aarch64-linux -Doptimize=ReleaseFast

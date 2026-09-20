@@ -39,7 +39,7 @@ pub fn main(init: std.process.Init) void {
     var err_buf: [256]u8 = undefined;
     var err_w = std.Io.File.writerStreaming(std.Io.File.stderr(), io, &err_buf);
 
-    const cfg = parseArgs(io, init.minimal.args);
+    const cfg = parseArgs(io, init.minimal.args, init.arena.allocator());
     run(io, cfg) catch |err| {
         const msg = switch (err) {
             error.BadWavHeader => "invalid wav: bad or truncated header",
@@ -63,13 +63,14 @@ fn usageExit(w: *std.Io.Writer) noreturn {
 
 /// Parses `-w`, `-p <f32>`, `-s <u32>`, `-h`. Prints the usage text and exits
 /// 2 on `-h` or on any invalid argument.
-fn parseArgs(io: std.Io, args: std.process.Args) Config {
+fn parseArgs(io: std.Io, args: std.process.Args, alloc: std.mem.Allocator) Config {
     var out_buf: [4096]u8 = undefined;
     var out_w = std.Io.File.writerStreaming(std.Io.File.stdout(), io, &out_buf);
     var err_buf: [256]u8 = undefined;
     var err_w = std.Io.File.writerStreaming(std.Io.File.stderr(), io, &err_buf);
 
-    var it = std.process.Args.Iterator.init(args);
+    var it = std.process.Args.Iterator.initAllocator(args, alloc) catch unreachable;
+    defer it.deinit();
     _ = it.next(); // program name
     var cfg: Config = .{};
     while (true) {

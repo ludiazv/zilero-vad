@@ -1,10 +1,62 @@
-# Placeholder — written in phase 9.
 name: release
+
 on:
   push:
     tags: ["v*"]
+
 jobs:
-  noop:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-linux
+            cpu: x86_64_v3
+            archive: tar.gz
+          - target: aarch64-linux
+            cpu: ""
+            archive: tar.gz
+          - target: x86_64-macos
+            cpu: x86_64_v3
+            archive: tar.gz
+          - target: aarch64-macos
+            cpu: ""
+            archive: tar.gz
+          - target: x86_64-windows
+            cpu: x86_64_v3
+            archive: zip
     steps:
-      - run: echo "placeholder"
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: build
+        run: |
+          args="-Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}"
+          if [ -n "${{ matrix.cpu }}" ]; then args="$args -Dcpu=${{ matrix.cpu }}"; fi
+          zig build $args --prefix out/${{ matrix.target }}
+      - name: archive
+        run: |
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            (cd out/${{ matrix.target }}/bin && zip -r ../../zilero-cli-${{ matrix.target }}.zip .)
+          else
+            tar czf zilero-cli-${{ matrix.target }}.tar.gz -C out/${{ matrix.target }}/bin .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zilero-cli-${{ matrix.target }}
+          path: zilero-cli-${{ matrix.target }}.${{ matrix.archive }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: artifacts/*/*
