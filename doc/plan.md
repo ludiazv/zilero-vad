@@ -356,7 +356,7 @@ simple voice activity detector cli. The cli read 16 bit signed 16Khz PCM samples
 options:
   -w  consider the input data as .wav file. (e.g.   cat file.wav | zilero-cli -w )
   -p  <prob 0-1> vad probability threshold (defaults: 0.55)
-  -s  <min silence ms> detect segements of voice that have at least min silence between then. must be > 100ms.
+  -s  <min silence ms> detect segements of voice that have at least min silence between then. must be >= 100ms.
 output:
    simple mode: for each frame received will output the vad probability with two decimal positions (e.g. 1.00, 0.86, 0.12) to stdout.
    segment mode: if -s is provided will output voice segments jsonl with the follwing format: {"start":start_ms,"end":end_ms,"avg_prob":float}

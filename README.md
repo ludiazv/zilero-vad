@@ -54,7 +54,7 @@ simple voice activity detector cli. The cli read 16 bit signed 16Khz PCM samples
 options:
   -w  consider the input data as .wav file. (e.g.   cat file.wav | zilero-cli -w )
   -p  <prob 0-1> vad probability threshold (defaults: 0.55)
-  -s  <min silence ms> detect segements of voice that have at least min silence between then. must be > 100ms.
+  -s  <min silence ms> detect segements of voice that have at least min silence between then. must be >= 100ms.
 output:
    simple mode: for each frame received will output the vad probability with two decimal positions (e.g. 1.00, 0.86, 0.12) to stdout.
    segment mode: if -s is provided will output voice segments jsonl with the follwing format: {"start":start_ms,"end":end_ms,"avg_prob":float}
@@ -112,13 +112,39 @@ uv run testdata/test_silero_vad.py bench   # frames/s, realtime, peak RSS
 `bench` runs the ONNX reference plus one or more CLI builds: pass
 `--cli [label=]path` (repeatable) to benchmark specific builds, e.g.
 portable/AVX2/AVX512 binaries built with `-Dcpu=x86_64`, `x86_64_v3` and
-`x86_64_v4`; with no `--cli` it builds and benches the default ReleaseFast
-CLI.
+`x86_64_v4`; with no `--cli` it builds ReleaseFast CLIs for `-Dcpu=native`,
+`x86_64_v3` and `x86_64` into `zig-out/bench/` and benches all three.
 
 `check` streams every sample wav in `testdata/` plus 5 minutes of
 deterministically generated audio through both implementations (ONNX
 Runtime, CPU, 1 thread, and the Zig CLI) and compares the per-frame
 probabilities at two decimal positions.
+
+## Benchmark
+
+`uv run testdata/test_silero_vad.py bench` on an AMD Ryzen 7 8700G (Zen 4),
+1 thread, 300 s of generated 16 kHz audio (9375 frames); median of 3 runs:
+
+| solution                    | frames/s | realtime | µs/frame | startup | peak RSS |
+|-----------------------------|---------:|---------:|---------:|--------:|---------:|
+| silero-vad onnx via python  |   11,196 |     358× |     89.3 |  131 ms |  69.1 MB |
+| zilero native (AVX512)      |   32,719 |   1,047× |     30.6 |   ~0 ms |   1.6 MB |
+| zilero x86_64_v3 (AVX2)     |   31,088 |     995× |     32.2 |   ~0 ms |   1.6 MB |
+| zilero x86_64 (portable)    |   19,559 |     626× |     51.1 |   ~0 ms |   1.6 MB |
+
+- Reference: ONNX Runtime 1.30.0 (CPU provider, 1 thread) running
+  `silero_vad_16k_op15.onnx` from a Python streaming loop. MLAS selects its
+  AVX-512 kernels on this CPU; most of its per-frame time is framework and
+  per-call overhead, not math.
+- frames/s, realtime and µs/frame cover the streaming loop (stdin read,
+  framing, inference, output). The onnx `startup` column (interpreter,
+  imports, session creation, 64-frame warm-up) is reported separately;
+  zilero's process startup is ~0.5 ms.
+- `x86_64` is the strict baseline (SSE2 only, no AVX instructions in the
+  binary) and runs on any x86-64 CPU. AVX2 gives ~1.6× over it; AVX-512 adds
+  only ~5% more on Zen 4.
+- Peak RSS is the whole process; for onnx it includes the Python interpreter,
+  numpy and onnxruntime.
 
 ## License
 

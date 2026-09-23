@@ -275,24 +275,25 @@ def peak_rss_sampler(pid: int) -> tuple[threading.Thread, list[int]]:
     return t, peak
 
 
-def run_child_bench(cmd: list[str], raw_path: Path) -> tuple[float, int, float]:
+def run_child_bench(cmd: list[str], raw_path: Path) -> tuple[float, int, float, bytes]:
     """Run a child that consumes the raw stream on stdin; return
-    (wall_seconds, frames, peak_rss_mb).
+    (process_wall_seconds, frames, peak_rss_mb, stdout).
 
+    The wall time spans spawn to exit, so it includes the child's startup.
     communicate() writes the stream to stdin while draining stdout, so a
     chatty child can never deadlock the pipes."""
+    data = raw_path.read_bytes()
+    t0 = time.perf_counter()
     proc = subprocess.Popen(
         cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
     )
     sampler, peak = peak_rss_sampler(proc.pid)
-    data = raw_path.read_bytes()
-    t0 = time.perf_counter()
-    proc.communicate(input=data)
+    out, _ = proc.communicate(input=data)
     wall = time.perf_counter() - t0
     sampler.join(timeout=1)
     if proc.returncode != 0:
         sys.exit(f"error: bench child failed (exit {proc.returncode}): {cmd[0]}")
-    return wall, n_frames(raw_path.stat().st_size // 2), peak[0] / 1024.0
+    return wall, n_frames(raw_path.stat().st_size // 2), peak[0] / 1024.0, out
 
 
 def cmd_bench_reference(raw_path: str) -> None:
@@ -352,11 +353,35 @@ def parse_cli_arg(arg: str) -> tuple[str, Path]:
     return label, p
 
 
+# Default bench builds: -Dcpu value and row label. `x86_64` is the strict
+# baseline (SSE2 only), i.e. a binary that runs on any x86-64 CPU.
+BENCH_CPUS = [
+    ("native", "zilero native"),
+    ("x86_64_v3", "zilero x86_64_v3 (AVX2)"),
+    ("x86_64", "zilero x86_64 (portable)"),
+]
+
+
+def build_bench_clis() -> list[tuple[str, Path]]:
+    """Build one ReleaseFast CLI per BENCH_CPUS entry into zig-out/bench/."""
+    clis = []
+    for cpu, label in BENCH_CPUS:
+        prefix = ROOT / "zig-out" / "bench" / cpu
+        print(f"building {label}: -Doptimize=ReleaseFast -Dcpu={cpu}", file=sys.stderr)
+        subprocess.run(
+            ["zig", "build", "-Doptimize=ReleaseFast", f"-Dcpu={cpu}",
+             "--prefix", str(prefix)],
+            cwd=ROOT, check=True,
+        )
+        clis.append((label, prefix / "bin" / "zilero-cli"))
+    return clis
+
+
 def cmd_bench(args: argparse.Namespace) -> int:
     if args.cli:
         clis = [parse_cli_arg(a) for a in args.cli]
     else:
-        clis = [("zilero-cli (ReleaseFast)", find_cli(None))]
+        clis = build_bench_clis()
     seconds = args.seconds
     f32 = generate_audio(seconds)
     raw = to_i16(f32)
@@ -372,23 +397,33 @@ def cmd_bench(args: argparse.Namespace) -> int:
         # Reference: python child running the ONNX model (same stream protocol).
         ref_cmd = [sys.executable, str(Path(__file__).resolve()),
                    "_bench-reference", str(raw_path)]
-        wall_ref, frames_ref, rss_ref = run_child_bench(ref_cmd, raw_path)
+        wall_ref, frames_ref, rss_ref, out = run_child_bench(ref_cmd, raw_path)
+        # Throughput from the child's own streaming-loop timer, which leaves
+        # out interpreter start, imports, session creation and warm-up.
+        loop_ref = json.loads(out)["wall_s"]
 
-        # Zilero: each CLI build streaming the same bytes.
-        rows = [("silero-vad onnx (1 thread)", frames_ref, wall_ref, rss_ref)]
+        # Zilero: each CLI build streaming the same bytes. Its process wall
+        # time is the loop time: startup is ~0.5 ms, so it is not separated.
+        rows = [("silero-vad onnx via python", frames_ref, loop_ref, wall_ref, rss_ref)]
         for label, cli in clis:
-            wall, frames, rss = run_child_bench([str(cli)], raw_path)
-            rows.append((label, frames, wall, rss))
+            wall, frames, rss, _ = run_child_bench([str(cli)], raw_path)
+            rows.append((label, frames, wall, wall, rss))
     finally:
         os.unlink(raw_path)
 
     rt = seconds
-    print(f"{'solution':28s} {'frames/s':>10s} {'realtime':>10s} {'peak RSS':>10s}")
-    for name, frames, wall, rss in rows:
-        print(f"{name:28s} {frames / wall:10.1f} {rt / wall:9.1f}x {rss:9.1f} MB")
+    print(f"{'solution':28s} {'frames/s':>10s} {'realtime':>10s} {'us/frame':>9s} "
+          f"{'startup':>9s} {'peak RSS':>10s}")
+    for name, frames, loop, wall, rss in rows:
+        print(f"{name:28s} {frames / loop:10.1f} {rt / loop:9.1f}x "
+              f"{loop / frames * 1e6:9.1f} {(wall - loop) * 1e3:7.0f}ms {rss:7.1f} MB")
     print()
-    print("notes: reference wall time includes stdin streaming; ONNX session")
-    print("warm-up (64 frames) excluded. peak RSS sampled from /proc (VmHWM).")
+    print("notes: frames/s, realtime and us/frame cover the streaming loop (stdin")
+    print("read, framing, inference, output). onnx: the per-frame loop runs in")
+    print("python + numpy; 'startup' is interpreter start, imports, session")
+    print("creation and a 64-frame warm-up. zilero: whole process, startup")
+    print("included (~0.5 ms). peak RSS is the whole process (VmHWM from /proc):")
+    print("for onnx that includes the python interpreter, numpy and onnxruntime.")
     return 0
 
 
@@ -405,7 +440,8 @@ def main() -> int:
     p_bench = sub.add_parser("bench", help="benchmark both implementations")
     p_bench.add_argument("--cli", action="append",
                          help="[label=]path to a zilero-cli build; repeatable "
-                              "(default: build and bench the default ReleaseFast cli)")
+                              "(default: build ReleaseFast for -Dcpu=native, "
+                              "x86_64_v3 and x86_64 into zig-out/bench/)")
     p_bench.add_argument("--seconds", type=int, default=GENERATED_SECONDS,
                          help=f"bench duration in seconds (default {GENERATED_SECONDS})")
     p_bench.set_defaults(fn=cmd_bench)

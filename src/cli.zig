@@ -28,7 +28,7 @@ const usage_text =
     \\options:
     \\  -w  consider the input data as .wav file. (e.g.   cat file.wav | zilero-cli -w )
     \\  -p  <prob 0-1> vad probability threshold (defaults: 0.55)
-    \\  -s  <min silence ms> detect segements of voice that have at least min silence between then. must be > 100ms.
+    \\  -s  <min silence ms> detect segements of voice that have at least min silence between then. must be >= 100ms.
     \\output:
     \\   simple mode: for each frame received will output the vad probability with two decimal positions (e.g. 1.00, 0.86, 0.12) to stdout.
     \\   segment mode: if -s is provided will output voice segments jsonl with the follwing format: {"start":start_ms,"end":end_ms,"avg_prob":float}
@@ -87,7 +87,7 @@ fn parseArgs(io: std.Io, args: std.process.Args, alloc: std.mem.Allocator) Confi
         } else if (std.mem.eql(u8, arg, "-s")) {
             const v = it.next() orelse usageExit(&err_w.interface);
             const ms = std.fmt.parseInt(u32, v, 10) catch usageExit(&err_w.interface);
-            if (ms <= 100) usageExit(&err_w.interface);
+            if (ms < 100) usageExit(&err_w.interface);
             cfg.min_silence_ms = ms;
         } else {
             usageExit(&err_w.interface);
