@@ -358,7 +358,7 @@ options:
   -p  <prob 0-1> vad probability threshold (defaults: 0.55)
   -s  <min silence ms> detect segements of voice that have at least min silence between then. must be > 100ms.
 output:
-   simple mode: for each frame received will output '1' if vad is >= p or '0' < p to stdout.
+   simple mode: for each frame received will output the vad probability with two decimal positions (e.g. 1.00, 0.86, 0.12) to stdout.
    segment mode: if -s is provided will output voice segments jsonl with the follwing format: {"start":start_ms,"end":end_ms,"avg_prob":float}
 ```
 
@@ -379,7 +379,8 @@ Steps:
 4. **Frame loop**: read 1024 bytes → 512 `i16` LE (`std.mem.readInt(i16, ..., .little)` or `@bitCast`
    after a byteswap on big-endian; just use `readInt`). A final partial frame is zero-padded to 512
    and processed. `prob = vad.process_i16(&frame)`. Frame `n` covers `[n*32, (n+1)*32)` ms.
-5. **Simple mode**: write `'1'` if `prob >= p` else `'0'`, followed by `'\n'`, per frame.
+5. **Simple mode**: write the probability formatted with two decimal positions
+   (`{d:.2}`, e.g. `1.00`, `0.86`, `0.12`), followed by `'\n'`, per frame.
 6. **Segment mode** (`-s`): state machine
    ```
    in_speech=false; seg_start_ms; last_speech_end_ms; sum_prob; n_prob
@@ -396,7 +397,7 @@ Steps:
 7. Exit code 0 on success, 1 on IO/format error (message to stderr), 2 on usage error.
 
 Manual check: `sox -n -r 16000 -c 1 -b 16 -t raw - synth 2 sine 440 | ./zig-out/bin/zilero-cli` should print
-~63 lines of `0`/`1` (63 = ceil(32000/512)). With a real speech wav and `-s 300`, segments should appear.
+~63 lines of probabilities (e.g. `0.00`, two decimals each; 63 = ceil(32000/512)). With a real speech wav and `-s 300`, segments should appear.
 
 Done when: both modes work on a raw stream and on a wav; bad `-s 50` prints usage and exits 2.
 

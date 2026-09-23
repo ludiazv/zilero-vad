@@ -34,6 +34,8 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{.{ .name = "zilero", .module = zilero_mod }},
+            .strip = optimize != .Debug,
+            .single_threaded = true,
         }),
     });
     b.installArtifact(cli);

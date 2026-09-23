@@ -55,14 +55,14 @@ options:
   -p  <prob 0-1> vad probability threshold (defaults: 0.55)
   -s  <min silence ms> detect segements of voice that have at least min silence between then. must be > 100ms.
 output:
-   simple mode: for each frame received will output '1' if vad is >= p or '0' < p to stdout.
+   simple mode: for each frame received will output the vad probability with two decimal positions (e.g. 1.00, 0.86, 0.12) to stdout.
    segment mode: if -s is provided will output voice segments jsonl with the follwing format: {"start":start_ms,"end":end_ms,"avg_prob":float}
 ```
 
 Examples:
 
 ```sh
-# one line per 32 ms frame: '1' if speech, '0' otherwise
+# one line per 32 ms frame: the speech probability, two decimals (0.00-1.00)
 cat audio.raw | ./zig-out/bin/zilero-cli
 
 # same, but the input is a 16-bit mono 16 kHz .wav file

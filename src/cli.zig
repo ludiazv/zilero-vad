@@ -2,7 +2,7 @@
 //!
 //! Reads 16-bit signed 16 kHz mono PCM from stdin (raw, or a .wav stream with
 //! `-w`) and writes to stdout:
-//!   simple mode  — one line per 32 ms frame: '1' if prob >= threshold else '0'
+//!   simple mode  — one line per 32 ms frame: the probability, two decimals
 //!   segment mode — JSONL voice segments when `-s <min silence ms>` is given
 //!
 //! Exit codes: 0 success, 1 IO/format error (message on stderr), 2 usage error.
@@ -30,7 +30,7 @@ const usage_text =
     \\  -p  <prob 0-1> vad probability threshold (defaults: 0.55)
     \\  -s  <min silence ms> detect segements of voice that have at least min silence between then. must be > 100ms.
     \\output:
-    \\   simple mode: for each frame received will output '1' if vad is >= p or '0' < p to stdout.
+    \\   simple mode: for each frame received will output the vad probability with two decimal positions (e.g. 1.00, 0.86, 0.12) to stdout.
     \\   segment mode: if -s is provided will output voice segments jsonl with the follwing format: {"start":start_ms,"end":end_ms,"avg_prob":float}
 ;
 
@@ -148,8 +148,7 @@ fn run(io: std.Io, cfg: Config) RunError!void {
                 in_speech = false;
             }
         } else {
-            const out: [2]u8 = .{ if (prob >= cfg.threshold) '1' else '0', '\n' };
-            std.Io.Writer.writeAll(&w.interface, &out) catch return error.IoError;
+            std.Io.Writer.print(&w.interface, "{d:.2}\n", .{prob}) catch return error.IoError;
         }
     }
 
