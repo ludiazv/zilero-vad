@@ -1,18 +1,23 @@
 //! Build-time weight generator for zilero-vad.
 //!
-//! Reads the upstream Silero VAD safetensors file and emits a Zig source
-//! file with every model weight as a flat comptime array, re-laid out so the
-//! library's inner loops run over contiguous memory.
+//! Reads the upstream Silero VAD ONNX file (v6.2, 16 kHz, opset 15) and
+//! emits a Zig source file with every model weight as a flat comptime
+//! array, re-laid out so the library's inner loops run over contiguous
+//! memory.
 //!
-//! Usage: gen_weights <in.safetensors> <out.zig>
+//! The needed initializers are top-level graph initializers with inline
+//! little-endian float32 `raw_data`, so a minimal protobuf walker (varints
+//! plus length-delimited fields) is enough — no protobuf library or schema.
+//!
+//! Usage: gen_weights <in.onnx> <out.zig>
 
 const std = @import("std");
 
 const Io = std.Io;
 const Writer = Io.Writer;
 
-/// One expected tensor: its safetensors name, the emitted Zig identifier,
-/// and (for conv weights) the re-layout dimensions.
+/// One expected initializer: its ONNX name, the emitted Zig identifier, and
+/// (for conv weights) the re-layout dimensions.
 const Tensor = struct {
     name: []const u8,
     id: []const u8,
@@ -27,24 +32,30 @@ const Tensor = struct {
 };
 
 const tensors = [_]Tensor{
-    .{ .name = "stft_conv.weight", .id = "stft_w", .size = "258 * 256", .len = 258 * 256, .in_features = null, .kernel = null },
-    .{ .name = "conv1.weight", .id = "conv1_w", .size = "128 * 3 * 129", .len = 128 * 129 * 3, .in_features = 129, .kernel = 3 },
-    .{ .name = "conv1.bias", .id = "conv1_b", .size = "128", .len = 128, .in_features = null, .kernel = null },
-    .{ .name = "conv2.weight", .id = "conv2_w", .size = "64 * 3 * 128", .len = 64 * 128 * 3, .in_features = 128, .kernel = 3 },
-    .{ .name = "conv2.bias", .id = "conv2_b", .size = "64", .len = 64, .in_features = null, .kernel = null },
-    .{ .name = "conv3.weight", .id = "conv3_w", .size = "64 * 3 * 64", .len = 64 * 64 * 3, .in_features = 64, .kernel = 3 },
-    .{ .name = "conv3.bias", .id = "conv3_b", .size = "64", .len = 64, .in_features = null, .kernel = null },
-    .{ .name = "conv4.weight", .id = "conv4_w", .size = "128 * 3 * 64", .len = 128 * 64 * 3, .in_features = 64, .kernel = 3 },
-    .{ .name = "conv4.bias", .id = "conv4_b", .size = "128", .len = 128, .in_features = null, .kernel = null },
-    .{ .name = "lstm_cell.weight_ih", .id = "lstm_w_ih", .size = "512 * 128", .len = 512 * 128, .in_features = null, .kernel = null },
-    .{ .name = "lstm_cell.bias_ih", .id = "lstm_b_ih", .size = "512", .len = 512, .in_features = null, .kernel = null },
-    .{ .name = "lstm_cell.weight_hh", .id = "lstm_w_hh", .size = "512 * 128", .len = 512 * 128, .in_features = null, .kernel = null },
-    .{ .name = "lstm_cell.bias_hh", .id = "lstm_b_hh", .size = "512", .len = 512, .in_features = null, .kernel = null },
-    .{ .name = "final_conv.weight", .id = "final_w", .size = "128", .len = 128, .in_features = null, .kernel = null },
-    .{ .name = "final_conv.bias", .id = "final_b", .size = "1", .len = 1, .in_features = null, .kernel = null },
+    .{ .name = "model.stft.forward_basis_buffer", .id = "stft_w", .size = "258 * 256", .len = 258 * 256, .in_features = null, .kernel = null },
+    .{ .name = "model.encoder.0.reparam_conv.weight", .id = "conv1_w", .size = "128 * 3 * 129", .len = 128 * 129 * 3, .in_features = 129, .kernel = 3 },
+    .{ .name = "model.encoder.0.reparam_conv.bias", .id = "conv1_b", .size = "128", .len = 128, .in_features = null, .kernel = null },
+    .{ .name = "model.encoder.1.reparam_conv.weight", .id = "conv2_w", .size = "64 * 3 * 128", .len = 64 * 128 * 3, .in_features = 128, .kernel = 3 },
+    .{ .name = "model.encoder.1.reparam_conv.bias", .id = "conv2_b", .size = "64", .len = 64, .in_features = null, .kernel = null },
+    .{ .name = "model.encoder.2.reparam_conv.weight", .id = "conv3_w", .size = "64 * 3 * 64", .len = 64 * 64 * 3, .in_features = 64, .kernel = 3 },
+    .{ .name = "model.encoder.2.reparam_conv.bias", .id = "conv3_b", .size = "64", .len = 64, .in_features = null, .kernel = null },
+    .{ .name = "model.encoder.3.reparam_conv.weight", .id = "conv4_w", .size = "128 * 3 * 64", .len = 128 * 64 * 3, .in_features = 64, .kernel = 3 },
+    .{ .name = "model.encoder.3.reparam_conv.bias", .id = "conv4_b", .size = "128", .len = 128, .in_features = null, .kernel = null },
+    .{ .name = "model.decoder.rnn.weight_ih", .id = "lstm_w_ih", .size = "512 * 128", .len = 512 * 128, .in_features = null, .kernel = null },
+    .{ .name = "model.decoder.rnn.bias_ih", .id = "lstm_b_ih", .size = "512", .len = 512, .in_features = null, .kernel = null },
+    .{ .name = "model.decoder.rnn.weight_hh", .id = "lstm_w_hh", .size = "512 * 128", .len = 512 * 128, .in_features = null, .kernel = null },
+    .{ .name = "model.decoder.rnn.bias_hh", .id = "lstm_b_hh", .size = "512", .len = 512, .in_features = null, .kernel = null },
+    .{ .name = "model.decoder.decoder.2.weight", .id = "final_w", .size = "128", .len = 128, .in_features = null, .kernel = null },
+    .{ .name = "model.decoder.decoder.2.bias", .id = "final_b", .size = "1", .len = 1, .in_features = null, .kernel = null },
 };
 
 const values_per_line = 16;
+
+/// A graph initializer: its name and the raw TensorProto bytes.
+const Init = struct {
+    name: []const u8,
+    proto: []const u8,
+};
 
 pub fn main(init: std.process.Init) !void {
     run(init) catch |err| {
@@ -66,11 +77,9 @@ fn run(init: std.process.Init) !void {
     defer arena.deinit();
 
     const data = try readFile(io, arena.allocator(), in_path);
-    const header_bytes: [8]u8 = data[0..8].*;
-    const header_len = std.mem.readInt(u64, &header_bytes, .little);
-    if (header_len == 0 or 8 + header_len > data.len) return error.InvalidHeader;
-    const data_start = 8 + @as(usize, @intCast(header_len));
-    const header = try std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), data[8..data_start], .{});
+    const graph = try graphBuffer(data);
+    var inits: [128]Init = undefined;
+    const n_inits = try collectInitializers(graph, inits[0..]);
 
     const out_file = try Io.Dir.createFile(.cwd(), io, out_path, .{});
     defer Io.File.close(out_file, io);
@@ -79,8 +88,8 @@ fn run(init: std.process.Init) !void {
     try Writer.writeAll(&writer.interface, "// Generated by tools/gen_weights.zig — do not edit.\n");
 
     for (tensors) |t| {
-        const entry = tensorEntry(&header, t.name) orelse missingTensor(io, &header, t.name);
-        const values = try extractValues(&arena, data, data_start, &t, entry);
+        const entry = findInit(inits[0..n_inits], t.name) orelse missingTensor(io, inits[0..n_inits], t.name);
+        const values = try extractValues(arena.allocator(), entry, &t);
         try emitTensor(&writer.interface, &t, values);
     }
     try Writer.flush(&writer.interface);
@@ -96,7 +105,7 @@ fn fail(io: Io, code: u8, comptime fmt: []const u8, args: anytype) noreturn {
 }
 
 fn usageFail(io: Io) noreturn {
-    fail(io, 2, "usage: gen_weights <in.safetensors> <out.zig>\n", .{});
+    fail(io, 2, "usage: gen_weights <in.onnx> <out.zig>\n", .{});
 }
 
 fn printStderr(io: Io, comptime fmt: []const u8, args: anytype) void {
@@ -116,82 +125,190 @@ fn readFile(io: Io, allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     return std.Io.Reader.readAlloc(&reader.interface, allocator, st.size);
 }
 
-/// Looks up a tensor entry in the parsed header object.
-fn tensorEntry(header: *const std.json.Value, name: []const u8) ?*const std.json.Value {
-    const obj = switch (header.*) {
-        .object => |o| o,
-        else => return null,
-    };
-    return obj.getPtr(name);
+// ---------------------------------------------------------------------------
+// Minimal protobuf reading (no library, no schema)
+// ---------------------------------------------------------------------------
+
+/// One field of a protobuf message.
+const Field = struct {
+    number: u32,
+    wire_type: u32,
+    /// Payload for wire type 2 (length-delimited).
+    data: []const u8,
+    /// Value for wire type 0 (varint).
+    varint: u64,
+};
+
+/// Iterator over the fields of a protobuf message.
+const FieldIter = struct {
+    buf: []const u8,
+    pos: usize,
+
+    /// Returns the next field, or null at the end of the message.
+    fn next(self: *FieldIter) !?Field {
+        if (self.pos >= self.buf.len) return null;
+        const tag = try readVarint(self.buf, &self.pos);
+        const number = @as(u32, @intCast(tag >> 3));
+        const wire_type = @as(u32, @intCast(tag & 7));
+        var f = Field{ .number = number, .wire_type = wire_type, .data = "", .varint = 0 };
+        switch (wire_type) {
+            0 => f.varint = try readVarint(self.buf, &self.pos),
+            1 => {
+                if (self.pos + 8 > self.buf.len) return error.Truncated;
+                self.pos += 8;
+            },
+            2 => {
+                const len = try readVarint(self.buf, &self.pos);
+                const l = @as(usize, @intCast(len));
+                if (self.pos + l > self.buf.len) return error.Truncated;
+                f.data = self.buf[self.pos .. self.pos + l];
+                self.pos += l;
+            },
+            5 => {
+                if (self.pos + 4 > self.buf.len) return error.Truncated;
+                self.pos += 4;
+            },
+            else => return error.UnsupportedWireType,
+        }
+        return f;
+    }
+};
+
+/// Reads a base-128 varint starting at `pos`, advancing `pos`.
+fn readVarint(buf: []const u8, pos: *usize) !u64 {
+    var result: u64 = 0;
+    var shift: u32 = 0;
+    while (true) {
+        if (pos.* >= buf.len) return error.Truncated;
+        const b = buf[pos.*];
+        pos.* = pos.* + 1;
+        result |= @as(u64, b & 0x7F) << @as(u6, @intCast(shift));
+        if (b & 0x80 == 0) return result;
+        shift = shift + 7;
+        if (shift >= 64) return error.VarintTooLong;
+    }
 }
 
-/// Prints the available tensor names and exits with code 1.
-fn missingTensor(io: Io, header: *const std.json.Value, name: []const u8) noreturn {
+/// ModelProto: returns the payload of field 7 (graph).
+fn graphBuffer(data: []const u8) ![]const u8 {
+    var it = FieldIter{ .buf = data, .pos = 0 };
+    while (try it.next()) |f| {
+        if (f.number == 7 and f.wire_type == 2) return f.data;
+    }
+    return error.NoGraph;
+}
+
+/// GraphProto: collects the repeated field 5 (initializer) payloads.
+fn collectInitializers(graph: []const u8, out: []Init) !usize {
+    var it = FieldIter{ .buf = graph, .pos = 0 };
+    var n: usize = 0;
+    while (try it.next()) |f| {
+        if (f.number == 5 and f.wire_type == 2) {
+            if (n == out.len) return error.TooManyInitializers;
+            out[n] = .{ .name = "", .proto = f.data };
+            n += 1;
+        }
+    }
+    for (out[0..n]) |*init| {
+        init.name = try tensorName(init.proto);
+    }
+    return n;
+}
+
+/// TensorProto: returns the payload of field 8 (name).
+fn tensorName(proto: []const u8) ![]const u8 {
+    var it = FieldIter{ .buf = proto, .pos = 0 };
+    while (try it.next()) |f| {
+        if (f.number == 8 and f.wire_type == 2) return f.data;
+    }
+    return error.NoName;
+}
+
+fn findInit(inits: []const Init, name: []const u8) ?*const Init {
+    for (inits) |*init| {
+        if (std.mem.eql(u8, init.name, name)) return init;
+    }
+    return null;
+}
+
+/// Prints the available initializer names and exits with code 1.
+fn missingTensor(io: Io, inits: []const Init, name: []const u8) noreturn {
     var buf: [4096]u8 = undefined;
     var w = Io.File.writerStreaming(.stderr(), io, &buf);
-    Writer.print(&w.interface, "gen_weights: tensor '{s}' not found in safetensors file.\nAvailable tensors:\n", .{name}) catch {};
-    switch (header.*) {
-        .object => |obj| {
-            var it = obj.iterator();
-            while (it.next()) |entry| {
-                Writer.print(&w.interface, "  {s}\n", .{entry.key_ptr.*}) catch {};
-            }
-        },
-        else => {},
+    Writer.print(&w.interface, "gen_weights: initializer '{s}' not found in ONNX file.\nAvailable initializers:\n", .{name}) catch {};
+    for (inits) |init| {
+        Writer.print(&w.interface, "  {s}\n", .{init.name}) catch {};
     }
     Writer.flush(&w.interface) catch {};
     std.process.exit(1);
 }
 
-/// Reads one tensor's floats (little-endian), validating dtype and shape,
-/// and re-lays out conv weights to [out][k][in].
-fn extractValues(
-    arena: *std.heap.ArenaAllocator,
-    data: []const u8,
-    data_start: usize,
-    t: *const Tensor,
-    entry: *const std.json.Value,
-) ![]f32 {
-    const obj = switch (entry.*) {
-        .object => |o| o,
-        else => return error.InvalidTensor,
-    };
-    const dtype = jsonString(&obj, "dtype") orelse return error.InvalidTensor;
+// ---------------------------------------------------------------------------
+// Tensor extraction and emission
+// ---------------------------------------------------------------------------
 
-    var shape: [4]usize = undefined;
-    const n_dims = jsonInts(&obj, "shape", &shape) orelse return error.InvalidTensor;
+/// Reads one initializer's floats (little-endian), validating dtype and
+/// shape, and re-lays out conv weights to [out][k][in].
+fn extractValues(allocator: std.mem.Allocator, init: *const Init, t: *const Tensor) ![]f32 {
+    var dims: [4]usize = undefined;
+    var n_dims: usize = 0;
+    var data_type: u32 = 0;
+    var raw: []const u8 = "";
+    var float_data: []const u8 = "";
+
+    var it = FieldIter{ .buf = init.proto, .pos = 0 };
+    while (try it.next()) |f| {
+        switch (f.number) {
+            1 => { // dims (repeated int64, plain or packed varints)
+                if (f.wire_type == 0) {
+                    if (n_dims == dims.len) return error.TooManyDims;
+                    dims[n_dims] = @as(usize, @intCast(f.varint));
+                    n_dims += 1;
+                } else if (f.wire_type == 2) {
+                    var p: usize = 0;
+                    while (p < f.data.len) {
+                        if (n_dims == dims.len) return error.TooManyDims;
+                        const v = try readVarint(f.data, &p);
+                        dims[n_dims] = @as(usize, @intCast(v));
+                        n_dims += 1;
+                    }
+                } else return error.InvalidTensor;
+            },
+            2 => { // data_type
+                if (f.wire_type != 0) return error.InvalidTensor;
+                data_type = @as(u32, @intCast(f.varint));
+            },
+            4 => { // float_data (packed, fallback if raw_data is absent)
+                if (f.wire_type != 2) return error.InvalidTensor;
+                float_data = f.data;
+            },
+            9 => { // raw_data
+                if (f.wire_type != 2) return error.InvalidTensor;
+                raw = f.data;
+            },
+            else => {},
+        }
+    }
+
+    if (data_type != 1) return error.UnsupportedDtype; // TensorProto.FLOAT
     var prod: usize = 1;
-    for (shape[0..n_dims]) |d| prod *= d;
+    for (dims[0..n_dims]) |d| prod *= d;
     if (prod != t.len) return error.ShapeMismatch;
 
-    var offsets: [2]usize = undefined;
-    if (jsonInts(&obj, "data_offsets", &offsets) != 2) return error.InvalidTensor;
-    if (offsets[1] < offsets[0] or data_start + offsets[1] > data.len) return error.InvalidTensor;
-    const src = data[data_start + offsets[0] .. data_start + offsets[1]];
+    const src = if (raw.len != 0) raw else float_data;
+    if (src.len != t.len * 4) return error.ShapeMismatch;
 
-    const out = try arena.allocator().alloc(f32, t.len);
-    if (std.mem.eql(u8, dtype, "F32")) {
-        if (src.len != t.len * 4) return error.ShapeMismatch;
-        for (0..t.len) |i| {
-            const b: [4]u8 = src[i * 4 ..][0..4].*;
-            const bits = std.mem.readInt(u32, &b, .little);
-            out[i] = @as(f32, @bitCast(bits));
-        }
-    } else if (std.mem.eql(u8, dtype, "F16")) {
-        if (src.len != t.len * 2) return error.ShapeMismatch;
-        for (0..t.len) |i| {
-            const b: [2]u8 = src[i * 2 ..][0..2].*;
-            const bits = std.mem.readInt(u16, &b, .little);
-            out[i] = @as(f32, @floatCast(@as(f16, @bitCast(bits))));
-        }
-    } else {
-        return error.UnsupportedDtype;
+    const out = try allocator.alloc(f32, t.len);
+    for (0..t.len) |i| {
+        const b: [4]u8 = src[i * 4 ..][0..4].*;
+        const bits = std.mem.readInt(u32, &b, .little);
+        out[i] = @as(f32, @bitCast(bits));
     }
 
     if (t.in_features) |in_features| {
         const k = t.kernel orelse return error.InvalidTensor;
         const out_channels = t.len / (in_features * k);
-        var dst = try arena.allocator().alloc(f32, t.len);
+        var dst = try allocator.alloc(f32, t.len);
         for (0..out_channels) |o| {
             for (0..k) |kk| {
                 for (0..in_features) |i| {
@@ -202,34 +319,6 @@ fn extractValues(
         return dst;
     }
     return out;
-}
-
-/// Reads a JSON string field.
-fn jsonString(obj: *const std.json.ObjectMap, key: []const u8) ?[]const u8 {
-    const v = obj.get(key) orelse return null;
-    return switch (v) {
-        .string => |s| s,
-        else => null,
-    };
-}
-
-/// Reads a JSON array of non-negative integers into `out`; returns its length.
-fn jsonInts(obj: *const std.json.ObjectMap, key: []const u8, out: []usize) ?usize {
-    const v = obj.get(key) orelse return null;
-    const arr = switch (v) {
-        .array => |a| a,
-        else => return null,
-    };
-    if (arr.items.len > out.len) return null;
-    for (arr.items, 0..) |item, i| {
-        const n = switch (item) {
-            .integer => |n| n,
-            else => return null,
-        };
-        if (n < 0) return null;
-        out[i] = @intCast(n);
-    }
-    return arr.items.len;
 }
 
 /// Emits one tensor as a flat `pub const` with 16 hex floats per line.

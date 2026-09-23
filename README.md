@@ -75,13 +75,16 @@ cat audio.raw | ./zig-out/bin/zilero-cli -s 500
 ## How the weights are embedded
 
 `tools/gen_weights.zig` runs at build time (host) on
-`model/silero_vad_16k.safetensors`, validates the tensor shapes/dtypes,
-re-lays the convolution weights from `[out][in][k]` to `[out][k][in]`
-(convolution-friendly), and emits `zig-cache/.../weights.zig` — a plain Zig
-file of `pub const` arrays that the library imports as a private module. The
-output is cached by a content digest of the model file, so a build that does
-not touch the model does not re-run the generator. To swap models, replace
-`model/silero_vad_16k.safetensors` and rebuild.
+`model/silero_vad_16k_op15.onnx` — the official Silero VAD v6.2 model (16
+kHz, opset 15, from `src/silero_vad/data/` in the upstream repository). It
+walks the protobuf with a minimal varint/length-delimited reader (no
+protobuf library), pulls the 15 graph initializers, validates their
+dtypes/shapes, re-lays the convolution weights from `[out][in][k]` to
+`[out][k][in]` (convolution-friendly), and emits `zig-cache/.../weights.zig`
+— a plain Zig file of `pub const` arrays that the library imports as a
+private module. The output is cached by a content digest of the model file,
+so a build that does not touch the model does not re-run the generator. To
+swap models, replace `model/silero_vad_16k_op15.onnx` and rebuild.
 
 ## Tests
 
@@ -96,11 +99,18 @@ tanh-via-sigmoid, STFT, reflect padding), the end-to-end pipeline
 reset), and a naive scalar cross-check of the full `process` pipeline against
 the embedded weights.
 
-An optional Python reference test against
-`https://github.com/leotouroul/tinycudnn-vad` (`tinygrad_model.py`) was
-planned but skipped: the reference pipeline could not be made to run in this
-environment (no python3). The naive scalar cross-check plus the hand-derived
-invariants above stand in for it.
+An end-to-end cross-check against the reference ONNX model runs via
+`testdata/test_silero_vad.py` (needs `uv` for onnxruntime + numpy):
+
+```sh
+uv run testdata/test_silero_vad.py check   # per-frame probabilities, 2 decimals
+uv run testdata/test_silero_vad.py bench   # frames/s, realtime, peak RSS
+```
+
+`check` streams every sample wav in `testdata/` plus 5 minutes of
+deterministically generated audio through both implementations (ONNX
+Runtime, CPU, 1 thread, and the Zig CLI) and compares the per-frame
+probabilities at two decimal positions.
 
 ## License
 

@@ -3,7 +3,7 @@
 //! The network processes 512-sample (32 ms) frames of mono f32 audio in
 //! [-1, 1] and returns a speech probability in [0, 1]. All model weights are
 //! baked into the binary at build time (`@import("weights")`, generated from
-//! `model/silero_vad_16k.safetensors` by `tools/gen_weights.zig`). The
+//! `model/silero_vad_16k_op15.onnx` by `tools/gen_weights.zig`). The
 //! library never allocates: persistent state lives in the `VAD` struct
 //! (1.25 KB) and all scratch memory lives on the stack of `process` (4.6 KB).
 //!
@@ -22,7 +22,7 @@
 //!
 //! ## Data layout: transposed weights and features
 //!
-//! In the safetensors file, conv weights are stored PyTorch-style as
+//! In the ONNX file, conv weights are stored PyTorch-style as
 //! `[out][ci][k]` (input channel outer, kernel tap inner). The build-time
 //! generator re-lays them out as `[out][k][ci]` — kernel tap outer, input
 //! channel inner. Features are kept the same way: `[t][ci]` (time row
@@ -192,7 +192,7 @@ fn stftMagnitude(padded: *const [640]f32, mag: *[4][129]f32) void {
 
 /// Generic k3 conv1d (padding 1, fused relu) with comptime shape.
 ///
-/// `w` is `[out][k][ci]` — the build-time transpose of the safetensors
+/// `w` is `[out][k][ci]` — the build-time transpose of the ONNX
 /// `[out][ci][k]` layout — and `src` is `[t][ci]`, so each (tap, time) pair
 /// is one contiguous `dot(IN, ...)` over the whole channel axis: no inner
 /// channel loop, no gathers, no runtime transpose. Boundary taps (source

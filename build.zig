@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const gen = b.addRunArtifact(gen_exe);
-    gen.addFileArg(b.path("model/silero_vad_16k.safetensors"));
+    gen.addFileArg(b.path("model/silero_vad_16k_op15.onnx"));
     const weights_zig = gen.addOutputFileArg("weights.zig");
 
     // The library module is the public "zilero" module; the CLI and the tests
