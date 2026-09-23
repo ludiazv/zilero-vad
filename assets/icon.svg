@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="zilero-vad">
+  <title>zilero-vad</title>
+  <rect fill="#16161A" width="128" height="128" rx="28"/>
+  <g fill="#F59E0B">
+    <rect x="16" y="20" width="96" height="10" rx="5"/>
+    <rect x="16" y="98" width="96" height="10" rx="5"/>
+    <rect x="97.86" y="29.86" width="6" height="10" rx="3"/>
+    <rect x="85.57" y="33.57" width="6" height="22" rx="3"/>
+    <rect x="73.29" y="36.29" width="6" height="36" rx="3"/>
+    <rect x="61.00" y="41.00" width="6" height="46" rx="3"/>
+    <rect x="48.71" y="55.71" width="6" height="36" rx="3"/>
+    <rect x="36.43" y="72.43" width="6" height="22" rx="3"/>
+    <rect x="24.14" y="88.14" width="6" height="10" rx="3"/>
+  </g>
+</svg>

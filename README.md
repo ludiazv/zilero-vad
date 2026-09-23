@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.svg" alt="zilero-vad" width="420"></p>
+
 # zilero-vad
 
 A pure Zig 0.16 port of the [Silero VAD](https://github.com/snakers4/silero-vad)
