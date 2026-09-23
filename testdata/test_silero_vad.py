@@ -341,8 +341,22 @@ def cmd_bench_reference(raw_path: str) -> None:
     print(json.dumps({"frames": frames, "wall_s": wall}))
 
 
+def parse_cli_arg(arg: str) -> tuple[str, Path]:
+    """Parse a `--cli` value: `[label=]path`."""
+    label, sep, path = arg.partition("=")
+    if not sep:
+        label, path = Path(arg).name, arg
+    p = Path(path)
+    if not p.exists():
+        sys.exit(f"error: cli not found: {p}")
+    return label, p
+
+
 def cmd_bench(args: argparse.Namespace) -> int:
-    cli = find_cli(args.cli)
+    if args.cli:
+        clis = [parse_cli_arg(a) for a in args.cli]
+    else:
+        clis = [("zilero-cli (ReleaseFast)", find_cli(None))]
     seconds = args.seconds
     f32 = generate_audio(seconds)
     raw = to_i16(f32)
@@ -360,16 +374,15 @@ def cmd_bench(args: argparse.Namespace) -> int:
                    "_bench-reference", str(raw_path)]
         wall_ref, frames_ref, rss_ref = run_child_bench(ref_cmd, raw_path)
 
-        # Zilero: the CLI streaming the same bytes.
-        wall_zil, frames_zil, rss_zil = run_child_bench([str(cli)], raw_path)
+        # Zilero: each CLI build streaming the same bytes.
+        rows = [("silero-vad onnx (1 thread)", frames_ref, wall_ref, rss_ref)]
+        for label, cli in clis:
+            wall, frames, rss = run_child_bench([str(cli)], raw_path)
+            rows.append((label, frames, wall, rss))
     finally:
         os.unlink(raw_path)
 
     rt = seconds
-    rows = [
-        ("silero-vad onnx (1 thread)", frames_ref, wall_ref, rss_ref),
-        ("zilero-cli (ReleaseFast)", frames_zil, wall_zil, rss_zil),
-    ]
     print(f"{'solution':28s} {'frames/s':>10s} {'realtime':>10s} {'peak RSS':>10s}")
     for name, frames, wall, rss in rows:
         print(f"{name:28s} {frames / wall:10.1f} {rt / wall:9.1f}x {rss:9.1f} MB")
@@ -390,7 +403,9 @@ def main() -> int:
     p_check.set_defaults(fn=cmd_check)
 
     p_bench = sub.add_parser("bench", help="benchmark both implementations")
-    p_bench.add_argument("--cli", help="path to zilero-cli (default: build if needed)")
+    p_bench.add_argument("--cli", action="append",
+                         help="[label=]path to a zilero-cli build; repeatable "
+                              "(default: build and bench the default ReleaseFast cli)")
     p_bench.add_argument("--seconds", type=int, default=GENERATED_SECONDS,
                          help=f"bench duration in seconds (default {GENERATED_SECONDS})")
     p_bench.set_defaults(fn=cmd_bench)

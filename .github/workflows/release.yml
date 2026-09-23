@@ -9,21 +9,40 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        # x86_64 targets ship in two flavors: -v3 (AVX2) and -v4 (AVX512).
+        # Note: -v4 macOS binaries need real AVX512 (no Rosetta 2 support).
         include:
           - target: x86_64-linux
             cpu: x86_64_v3
+            suffix: -v3
+            archive: tar.gz
+          - target: x86_64-linux
+            cpu: x86_64_v4
+            suffix: -v4
             archive: tar.gz
           - target: aarch64-linux
             cpu: ""
+            suffix: ""
             archive: tar.gz
           - target: x86_64-macos
             cpu: x86_64_v3
+            suffix: -v3
+            archive: tar.gz
+          - target: x86_64-macos
+            cpu: x86_64_v4
+            suffix: -v4
             archive: tar.gz
           - target: aarch64-macos
             cpu: ""
+            suffix: ""
             archive: tar.gz
           - target: x86_64-windows
             cpu: x86_64_v3
+            suffix: -v3
+            archive: zip
+          - target: x86_64-windows
+            cpu: x86_64_v4
+            suffix: -v4
             archive: zip
     steps:
       - uses: actions/checkout@v4
@@ -34,18 +53,18 @@ jobs:
         run: |
           args="-Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}"
           if [ -n "${{ matrix.cpu }}" ]; then args="$args -Dcpu=${{ matrix.cpu }}"; fi
-          zig build $args --prefix out/${{ matrix.target }}
+          zig build $args --prefix out/${{ matrix.target }}${{ matrix.suffix }}
       - name: archive
         run: |
           if [ "${{ matrix.archive }}" = "zip" ]; then
-            (cd out/${{ matrix.target }}/bin && zip -r ../../zilero-cli-${{ matrix.target }}.zip .)
+            (cd out/${{ matrix.target }}${{ matrix.suffix }}/bin && zip -r ../../zilero-cli-${{ matrix.target }}${{ matrix.suffix }}.zip .)
           else
-            tar czf zilero-cli-${{ matrix.target }}.tar.gz -C out/${{ matrix.target }}/bin .
+            tar czf zilero-cli-${{ matrix.target }}${{ matrix.suffix }}.tar.gz -C out/${{ matrix.target }}${{ matrix.suffix }}/bin .
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: zilero-cli-${{ matrix.target }}
-          path: zilero-cli-${{ matrix.target }}.${{ matrix.archive }}
+          name: zilero-cli-${{ matrix.target }}${{ matrix.suffix }}
+          path: zilero-cli-${{ matrix.target }}${{ matrix.suffix }}.${{ matrix.archive }}
 
   release:
     needs: build

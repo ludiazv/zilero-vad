@@ -16,5 +16,7 @@ jobs:
         run: zig build test
       - name: test (x86_64_v3)
         run: zig build test -Dcpu=x86_64_v3
+      - name: test (x86_64_v4)
+        run: zig build test -Dcpu=x86_64_v4
       - name: cross-compile check (aarch64-linux)
         run: zig build -Dtarget=aarch64-linux -Doptimize=ReleaseFast

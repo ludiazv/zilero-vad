@@ -12,8 +12,9 @@ x86_64-v3, NEON on aarch64).
 zig build -Doptimize=ReleaseFast
 ```
 
-On x86_64 add `-Dcpu=x86_64_v3` to enable AVX2/FMA (otherwise the same code
-compiles to SSE2). On aarch64 nothing extra is needed — NEON is the baseline.
+On x86_64 add `-Dcpu=x86_64_v3` to enable AVX2/FMA or `-Dcpu=x86_64_v4`
+to enable AVX512 (otherwise the same code compiles to SSE2). On aarch64
+nothing extra is needed — NEON is the baseline.
 
 Produces `zig-out/bin/zilero-cli`.
 
@@ -90,7 +91,8 @@ swap models, replace `model/silero_vad_16k_op15.onnx` and rebuild.
 
 ```sh
 zig build test                 # debug (assertions on)
-zig build test -Dcpu=x86_64_v3 # simd path, x86_64
+zig build test -Dcpu=x86_64_v3 # simd path, x86_64 (AVX2)
+zig build test -Dcpu=x86_64_v4 # simd path, x86_64 (AVX512)
 ```
 
 The suite covers the scalar/simd primitives (conv, LSTM cell, sigmoid,
@@ -106,6 +108,12 @@ An end-to-end cross-check against the reference ONNX model runs via
 uv run testdata/test_silero_vad.py check   # per-frame probabilities, 2 decimals
 uv run testdata/test_silero_vad.py bench   # frames/s, realtime, peak RSS
 ```
+
+`bench` runs the ONNX reference plus one or more CLI builds: pass
+`--cli [label=]path` (repeatable) to benchmark specific builds, e.g.
+portable/AVX2/AVX512 binaries built with `-Dcpu=x86_64`, `x86_64_v3` and
+`x86_64_v4`; with no `--cli` it builds and benches the default ReleaseFast
+CLI.
 
 `check` streams every sample wav in `testdata/` plus 5 minutes of
 deterministically generated audio through both implementations (ONNX
