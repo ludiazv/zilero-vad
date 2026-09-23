@@ -2,9 +2,43 @@
 //!
 //! The network processes 512-sample (32 ms) frames of mono f32 audio in
 //! [-1, 1] and returns a speech probability in [0, 1]. All model weights are
-//! baked into the binary at build time (`@import("weights")`). The library
-//! never allocates: persistent state lives in the `VAD` struct (1.28 KB) and
-//! all scratch memory lives on the stack of `process` (4.6 KB).
+//! baked into the binary at build time (`@import("weights")`, generated from
+//! `model/silero_vad_16k.safetensors` by `tools/gen_weights.zig`). The
+//! library never allocates: persistent state lives in the `VAD` struct
+//! (1.25 KB) and all scratch memory lives on the stack of `process` (4.6 KB).
+//!
+//! ## Algorithm flow (per frame)
+//!
+//! 1. **Pad** — `context ++ frame ++ reflect(frame)` → 640 samples, where
+//!    `context` is the last 64 samples of the previous frame (zeros at
+//!    stream start).
+//! 2. **STFT** — the reference model's 256-tap, hop-128 STFT, expressed as
+//!    a conv1d over the padded buffer → magnitude spectrogram `[4][129]`.
+//! 3. **Convs** — four k3 conv1d layers with fused relu, temporal strides
+//!    1, 2, 2, 1: `[4][129] → [4][128] → [2][64] → [1][64] → [1][128]`.
+//! 4. **LSTM** — one LSTMCell step (128 units, PyTorch gate order i, f, g,
+//!    o) on the conv output; `h` and `c` persist between frames.
+//! 5. **Output** — `sigmoid(w · relu(h) + b)` → speech probability.
+//!
+//! ## Data layout: transposed weights and features
+//!
+//! In the safetensors file, conv weights are stored PyTorch-style as
+//! `[out][ci][k]` (input channel outer, kernel tap inner). The build-time
+//! generator re-lays them out as `[out][k][ci]` — kernel tap outer, input
+//! channel inner. Features are kept the same way: `[t][ci]` (time row
+//! outer, channel inner) rather than `[ci][t]`. With both sides in
+//! `[k][ci]` / `[t][ci]` form, every convolution tap over one time row is a
+//! single contiguous dot product of two flat `f32` arrays — the innermost
+//! loop of the whole network is `dot(IN, w_row, x_row)`, which lowers to
+//! SIMD with no gathers, no runtime transposes, and no inner channel loop.
+//!
+//! ## Scratch memory
+//!
+//! `process` uses two `align(32)` buffers — 640 and 516 floats (4.6 KB) —
+//! and ping-pongs them through the stages, reinterpreting each buffer's
+//! bytes for the next stage's shape (padded→c1→c3→gates in one, mag→c2→c4
+//! in the other). Every stage fully overwrites its output before the next
+//! stage reads it, so no buffer is ever zeroed or copied.
 
 const std = @import("std");
 const weights = @import("weights");
@@ -15,7 +49,8 @@ pub const sample_rate = 16000;
 pub const frame_size = 512;
 
 /// Voice activity detector. Zero-initialized via `var vad: VAD = .{};`;
-/// call `reset` between unrelated audio streams.
+/// call `reset` between unrelated audio streams. Holds all persistent state
+/// (1.25 KB); per-frame scratch (4.6 KB) lives on the stack of `process`.
 pub const VAD = struct {
     /// LSTM hidden state, persists between frames.
     h: [128]f32 = @splat(0),
@@ -67,8 +102,14 @@ pub const VAD = struct {
     }
 };
 
-/// SIMD dot product. Optimized float mode is required: in strict mode the
-/// `@reduce` is emitted as an ordered scalar add chain.
+/// SIMD dot product of two `n`-lane f32 arrays.
+///
+/// The whole product is one multiply over an `@Vector(n, f32)` plus a single
+/// `@reduce(.Add)`: the compiler chunks the vector into the target's SIMD
+/// lanes (SSE2 baseline, AVX2 with `-Dcpu=x86_64_v3`, NEON on aarch64) and
+/// builds an FMA add tree for the reduction. `@setFloatMode(.optimized)` is
+/// required — in strict mode the `@reduce` lowers to an ordered scalar add
+/// chain, which is what this function exists to avoid.
 fn dot(comptime n: usize, a: *const [n]f32, b: *const [n]f32) f32 {
     @setFloatMode(.optimized);
     const V = @Vector(n, f32);
@@ -77,14 +118,17 @@ fn dot(comptime n: usize, a: *const [n]f32, b: *const [n]f32) f32 {
     return @reduce(.Add, va * vb);
 }
 
+/// Vector sigmoid: `1 / (1 + exp(-v))`.
 fn sigmoidOf(comptime n: usize, v: @Vector(n, f32)) @Vector(n, f32) {
     const one: @Vector(n, f32) = @splat(1);
     const neg: @Vector(n, f32) = @splat(-1);
     return one / (one + @exp(v * neg));
 }
 
+/// Vector tanh via the identity `tanh(v) = 2·sigmoid(2v) − 1`. There is no
+/// vector `@tanh` builtin; this reuses the vector sigmoid path and matches
+/// `std.math.tanh` to f32 precision (see tests).
 fn tanhOf(comptime n: usize, v: @Vector(n, f32)) @Vector(n, f32) {
-    // tanh(v) = 2*sigmoid(2v) - 1
     const two: @Vector(n, f32) = @splat(2);
     const one: @Vector(n, f32) = @splat(1);
     return two * sigmoidOf(n, two * v) - one;
@@ -113,19 +157,26 @@ fn sigmoid1(x: f32) f32 {
     return 1 / (1 + @exp(-x));
 }
 
-/// Lays out `context ++ frame ++ reflect-pad(frame)` into `padded`.
+/// Lays out `context ++ frame ++ reflect(frame)` into `padded` (640
+/// floats). The reflect tail follows PyTorch semantics: the edge sample is
+/// not repeated, so `padded[576 + k] = padded[574 - k]`.
 fn pad(self: *VAD, frame: *const [frame_size]f32, padded: *[640]f32) void {
     @memcpy(padded[0..64], self.context[0..64]);
     @memcpy(padded[64..576], frame[0..512]);
-    // PyTorch reflect pad: the edge sample is not repeated.
     for (0..64) |k| {
         padded[576 + k] = padded[574 - k];
     }
 }
 
-/// STFT via the stft_conv weights, then magnitude. Kernel-outer /
-/// window-inner so each 1 KB kernel row is read from memory once and applied
-/// to the four L1-resident windows.
+/// STFT magnitude. The reference model implements the 256-tap, hop-128
+/// STFT as a conv1d (`stft_conv`): `weights.stft_w` holds 258 rows of 256
+/// taps — rows 0..128 the real part, rows 129..257 the imaginary part, one
+/// row per frequency bin. Each of the four time windows is a contiguous
+/// 256-float slice of `padded`, so each bin is two 256-lane dot products:
+/// `mag[t][f] = hypot(dot(w_re[f], win), dot(w_im[f], win))`.
+///
+/// The loop is kernel-outer / window-inner: each 1 KB weight row is read
+/// from memory once and applied to the four L1-resident windows.
 fn stftMagnitude(padded: *const [640]f32, mag: *[4][129]f32) void {
     for (0..129) |f| {
         const wr: *const [256]f32 = weights.stft_w[f * 256 ..][0..256];
@@ -139,9 +190,14 @@ fn stftMagnitude(padded: *const [640]f32, mag: *[4][129]f32) void {
     }
 }
 
-/// Generic k3 conv1d with padding=1 and fused relu. `w` is laid out
-/// [out][k][in]. Boundary taps (source row -1 or T_IN) are skipped at
-/// comptime; there are no zero-padding rows.
+/// Generic k3 conv1d (padding 1, fused relu) with comptime shape.
+///
+/// `w` is `[out][k][ci]` — the build-time transpose of the safetensors
+/// `[out][ci][k]` layout — and `src` is `[t][ci]`, so each (tap, time) pair
+/// is one contiguous `dot(IN, ...)` over the whole channel axis: no inner
+/// channel loop, no gathers, no runtime transpose. Boundary taps (source
+/// row −1 or T_IN) are skipped at comptime, so there are no zero-padding
+/// rows and no runtime branch. `stride` is the temporal stride (1 or 2).
 fn conv3(
     comptime IN: usize,
     comptime OUT: usize,
@@ -169,8 +225,14 @@ fn conv3(
     }
 }
 
-/// One LSTMCell step (PyTorch gate order i, f, g, o). Writes the new h and c
-/// into `self`; `gates` is 512 floats of scratch.
+/// One LSTMCell step (128 units, PyTorch gate order i, f, g, o).
+///
+/// The gate matrices are row-major `[gate][ci]`, so all 512 pre-activations
+/// are 128-lane dot products against `x` and the previous `h`
+/// (`w_ih[j]·x + b_ih[j] + w_hh[j]·h + b_hh[j]`), written into `gates`
+/// (512 floats of scratch). The non-linearities then run in place as vector
+/// ops over four 128-lane chunks, and the state update is two vector
+/// expressions: `c' = f·c + i·g`, `h' = o·tanh(c')`.
 fn lstmStep(self: *VAD, x: *const [128]f32, gates: *[512]f32) void {
     for (0..512) |j| {
         const wr_ih: *const [128]f32 = weights.lstm_w_ih[j * 128 ..][0..128];
@@ -193,8 +255,9 @@ fn lstmStep(self: *VAD, x: *const [128]f32, gates: *[512]f32) void {
     self.h = o * tanhOf(128, c_new);
 }
 
-/// final_conv + sigmoid over relu(h). `self.h` is the un-relu'd state for
-/// the next frame, so it is not modified here.
+/// Final layer: `sigmoid(w · relu(h) + b)`. The relu lives only in the
+/// vector expression — `self.h` keeps the un-relu'd state for the next
+/// frame, so it is not modified here.
 fn finalOutput(self: *VAD) f32 {
     @setFloatMode(.optimized);
     const V = @Vector(128, f32);
