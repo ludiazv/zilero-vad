@@ -210,17 +210,19 @@ fn conv3(
     dst: *[T_OUT][OUT]f32,
 ) void {
     for (0..OUT) |o| {
-        inline for (0..T_OUT) |t| {
-            var acc = b[o];
-            inline for (0..3) |k| {
-                const r = @as(isize, t * stride + k) - 1;
-                if (r >= 0 and r < T_IN) {
+        inline for (0..T_OUT) |t| { // Unrolled comptime loop over the input channels.
+            var acc = b[o]; // Load the vias in the accumulator
+
+            inline for (0..3) |k| { // inline for (unrolled at compile time) for 3 elementes of the kernel.
+
+                const r = @as(isize, t * stride + k) - 1; // virtual zero pading this is comptime variable.
+                if (r >= 0 and r < T_IN) { // This is a comptime if no overhad.
                     const row: *const [IN]f32 = &src[@as(usize, @intCast(r))];
                     const wr: *const [IN]f32 = w[(o * 3 + k) * IN ..][0..IN];
                     acc += dot(IN, wr, row);
                 }
             }
-            dst[t][o] = @max(acc, 0);
+            dst[t][o] = @max(acc, 0); // Fused relu
         }
     }
 }
