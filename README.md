@@ -22,16 +22,55 @@ Produces `zig-out/bin/zilero-cli`.
 
 ## Library usage
 
-Add as a dependency in `build.zig.zon`:
+### Typical cycle: `zig fetch` + `build.zig`
+
+From the consumer project, fetch the package from its git remote. `--save`
+records the dependency in `build.zig.zon`, pinned to the resolved commit:
+
+```sh
+zig fetch --save git+https://github.com/ludiazv/zilero-vad
+```
 
 ```zig
-.zig {
-    .name = ".your_app",
+// build.zig.zon — entry written by zig fetch --save
+.{
+    .name = .your_app,
+    .version = "0.1.0",
+    .fingerprint = 0x0, // the consumer's own; first build prints the value to paste
     .dependencies = .{
-        .zilero = .{ .path = "../zilero-vad" },
+        .zilero_vad = .{
+            .url = "git+https://github.com/ludiazv/zilero-vad#<commit>",
+            .hash = "zilero_vad-0.1.0-<hash>",
+        },
     },
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
 }
 ```
+
+Then wire the module up in `build.zig` (the dependency key is the package
+name `zilero_vad`; the module it exposes is named `zilero`):
+
+```zig
+const zilero = b.dependency("zilero_vad", .{});
+
+const exe = b.addExecutable(.{
+    .name = "your_app",
+    .root_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "zilero", .module = zilero.module("zilero") }},
+    }),
+});
+```
+
+and build. `zig build` fetches the pinned package into the local package
+directory automatically; re-run `zig fetch --save <url>` any time to re-pin
+to the current `master`. The package's build script runs the weight
+generator and imports the generated `weights` module into `zilero` for you —
+nothing else to wire up.
+
+Use it in your source:
 
 ```zig
 const zilero = @import("zilero");
@@ -42,6 +81,18 @@ var frame: [zilero.frame_size]i16 = undefined; // 512 samples
 const prob = vad.process_i16(&frame); // speech probability in [0, 1]
 vad.reset(); // between unrelated streams
 ```
+
+### Local development: path dependency
+
+For iterating against a local checkout, replace the fetched entry with a
+relative path (it must be relative to the build root; absolute paths are
+rejected):
+
+```zig
+.zilero_vad = .{ .path = "../zilero-vad" },
+```
+
+The `build.zig` wiring and source usage are unchanged.
 
 Contract: feed exactly `zilero.frame_size` (512) samples per call, 16 kHz
 mono, little-endian `i16`. Call `reset()` before processing an unrelated
