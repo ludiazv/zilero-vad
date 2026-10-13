@@ -63,8 +63,8 @@ def find_cli(explicit: str | None) -> Path:
         return p
     p = ROOT / "zig-out" / "bin" / "zilero-cli"
     if not p.exists():
-        print(f"cli not found, building (ReleaseFast): {p}", file=sys.stderr)
-        subprocess.run(["zig", "build", "-Doptimize=ReleaseFast"], cwd=ROOT, check=True)
+        print(f"cli not found, building (fast): {p}", file=sys.stderr)
+        subprocess.run(["zig", "build", "-Doptimize=fast"], cwd=ROOT, check=True)
     return p
 
 
@@ -363,13 +363,13 @@ BENCH_CPUS = [
 
 
 def build_bench_clis() -> list[tuple[str, Path]]:
-    """Build one ReleaseFast CLI per BENCH_CPUS entry into zig-out/bench/."""
+    """Build one fast CLI per BENCH_CPUS entry into zig-out/bench/."""
     clis = []
     for cpu, label in BENCH_CPUS:
         prefix = ROOT / "zig-out" / "bench" / cpu
-        print(f"building {label}: -Doptimize=ReleaseFast -Dcpu={cpu}", file=sys.stderr)
+        print(f"building {label}: -Doptimize=fast -Dcpu={cpu}", file=sys.stderr)
         subprocess.run(
-            ["zig", "build", "-Doptimize=ReleaseFast", f"-Dcpu={cpu}",
+            ["zig", "build", "-Doptimize=fast", f"-Dcpu={cpu}",
              "--prefix", str(prefix)],
             cwd=ROOT, check=True,
         )
@@ -440,7 +440,7 @@ def main() -> int:
     p_bench = sub.add_parser("bench", help="benchmark both implementations")
     p_bench.add_argument("--cli", action="append",
                          help="[label=]path to a zilero-cli build; repeatable "
-                              "(default: build ReleaseFast for -Dcpu=native, "
+                              "(default: build fast for -Dcpu=native, "
                               "x86_64_v3 and x86_64 into zig-out/bench/)")
     p_bench.add_argument("--seconds", type=int, default=GENERATED_SECONDS,
                          help=f"bench duration in seconds (default {GENERATED_SECONDS})")

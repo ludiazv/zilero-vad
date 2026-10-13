@@ -1,6 +1,6 @@
 # Zilero VAD — Implementation Plan (handover for the coding worker)
 
-Goal: a pure-Zig (0.16, `std` only, no libc, no allocations) port of Silero VAD, 16 kHz mode only,
+Goal: a pure-Zig (0.17, `std` only, no libc, no allocations) port of Silero VAD, 16 kHz mode only,
 with model weights baked into the binary at build time from the upstream `.safetensors` file,
 SIMD via `@Vector`, targeting x86_64 (AVX2) and aarch64 (NEON).
 
@@ -14,7 +14,7 @@ the next phase until the current one passes. Commit at the end of every phase.
 
 ## 0. Ground rules that apply to every phase
 
-* Zig **0.16**. Before using any `std` API you are not 100% sure about (file IO, stdin/stdout,
+* Zig **0.17**. Before using any `std` API you are not 100% sure about (file IO, stdin/stdout,
   `std.Build`), open the installed std source (`zig env` prints `lib_dir`; look in
   `<lib_dir>/std/`) and copy the real signature. Do not guess from memory: 0.15/0.16 changed IO
   (`std.Io.Writer`/`std.Io.Reader`, `std.fs.File.stdout()`, buffered writers with a caller-owned
@@ -54,7 +54,7 @@ Steps:
        .name = .zilero_vad,
        .version = "0.1.0",
        .fingerprint = 0x0, // run `zig build` once; the compiler prints the correct value, paste it
-       .minimum_zig_version = "0.16.0",
+       .minimum_zig_version = "0.17.0",
        .dependencies = .{},
        .paths = .{ "build.zig", "build.zig.zon", "src", "tools", "model", "README.md", "LICENSE" },
    }

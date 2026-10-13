@@ -4,7 +4,7 @@ Apply these rules to every file you write in this project. When a rule conflicts
 you "remember" about Zig, the rule wins; when unsure about an API, read the installed std source.
 
 ## 1. Toolchain and verification loop
-* Zig **0.16** only. Run `zig version` first; if it is not 0.16.x, stop and report.
+* Zig **0.17** only. Run `zig version` first; if it is not 0.17.x, stop and report.
 * Never trust memory for `std` signatures. Find `lib_dir` with `zig env`, then `grep -rn "pub fn <name>" <lib_dir>/std/` and copy the real signature. Especially: `std.Io.Writer`, `std.Io.Reader`, `std.fs.File.stdout()/stdin()`, `std.process` args, `std.Build.*`, `std.json.parseFromSlice`.
 * After every edit: `zig fmt .` → `zig build` → `zig build test`. Fix the first error, rerun. Do not batch up many changes before compiling.
 * Commit after each green phase with a message `phase N: <what>`.
@@ -34,7 +34,7 @@ you "remember" about Zig, the rule wins; when unsure about an API, read the inst
 * Convert arrays to vectors with `const v: V = arr.*;` and back with `arr.* = v;`.
 * Horizontal sum: `@reduce(.Add, v)`, always inside a function that has `@setFloatMode(.optimized)` (strict mode turns the reduction into a scalar chain).
 * Elementwise: `@max(v, @as(V, @splat(0)))` for relu, `@exp(v)`, `@sqrt(v)` operate on vectors. Never mix scalars and vectors in one operator; `@splat` first.
-* SIMD codegen comes from LLVM: use `ReleaseFast` for the CLI and benchmarks (x86_64 Debug uses the scalar self-hosted backend).
+* SIMD codegen comes from LLVM: use `fast` for the CLI and benchmarks (x86_64 Debug uses the scalar self-hosted backend).
 * No inline assembly, no target-specific intrinsics. Portability across x86_64/aarch64 comes from `@Vector` only.
 
 ## 6. Error handling
@@ -44,7 +44,7 @@ you "remember" about Zig, the rule wins; when unsure about an API, read the inst
 * No `std.debug.print` in library or CLI hot paths (fine in the build tool for the missing-tensor report).
 
 ## 7. IO (CLI and build tool)
-* Use buffered readers/writers with caller-owned `[N]u8` buffers as 0.16 requires, and **flush** stdout before returning from `main`.
+* Use buffered readers/writers with caller-owned `[N]u8` buffers as 0.17 requires, and **flush** stdout before returning from `main`.
 * Reading from stdin: loop until you have the bytes you need or hit EOF; a short read is normal.
 * Endianness: parse binary with `std.mem.readInt(T, bytes[0..@sizeOf(T)], .little)`.
 

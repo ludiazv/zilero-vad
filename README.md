@@ -2,7 +2,7 @@
 
 # zilero-vad
 
-A pure Zig 0.16 port of the [Silero VAD](https://github.com/snakers4/silero-vad)
+A pure Zig 0.17 port of the [Silero VAD](https://github.com/snakers4/silero-vad)
 (16 kHz mode): a small, accurate voice activity detector. No dependencies, no
 libc, no heap allocations in the library (all scratch is stack), model weights
 embedded at build time, hot loops SIMD-compiled via `@Vector` (AVX2 on
@@ -11,7 +11,7 @@ x86_64-v3, NEON on aarch64).
 ## Build
 
 ```sh
-zig build -Doptimize=ReleaseFast
+zig build -Doptimize=fast
 ```
 
 On x86_64 add `-Dcpu=x86_64_v3` to enable AVX2/FMA or `-Dcpu=x86_64_v4`
@@ -114,7 +114,7 @@ uv run testdata/test_silero_vad.py bench   # frames/s, realtime, peak RSS
 `bench` runs the ONNX reference plus one or more CLI builds: pass
 `--cli [label=]path` (repeatable) to benchmark specific builds, e.g.
 portable/AVX2/AVX512 binaries built with `-Dcpu=x86_64`, `x86_64_v3` and
-`x86_64_v4`; with no `--cli` it builds ReleaseFast CLIs for `-Dcpu=native`,
+`x86_64_v4`; with no `--cli` it builds `fast` CLIs for `-Dcpu=native`,
 `x86_64_v3` and `x86_64` into `zig-out/bench/` and benches all three.
 
 `check` streams every sample wav in `testdata/` plus 5 minutes of

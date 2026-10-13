@@ -48,10 +48,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.17.0
       - name: build
         run: |
-          args="-Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}"
+          args="-Doptimize=fast -Dtarget=${{ matrix.target }}"
           if [ -n "${{ matrix.cpu }}" ]; then args="$args -Dcpu=${{ matrix.cpu }}"; fi
           zig build $args --prefix out/${{ matrix.target }}${{ matrix.suffix }}
       - name: archive

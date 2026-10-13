@@ -11,12 +11,12 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("tools/gen_weights.zig"),
             .target = b.graph.host,
-            .optimize = .ReleaseSafe,
+            .optimize = .safe,
         }),
     });
     const gen = b.addRunArtifact(gen_exe);
-    gen.addFileArg(b.path("model/silero_vad_16k_op15.onnx"));
-    const weights_zig = gen.addOutputFileArg("weights.zig");
+    gen.addFileArg2(b.path("model/silero_vad_16k_op15.onnx"), .{});
+    const weights_zig = gen.addOutputFileArg2("weights.zig", .{});
 
     // The library module is the public "zilero" module; the CLI and the tests
     // use the same object.
@@ -34,7 +34,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{.{ .name = "zilero", .module = zilero_mod }},
-            .strip = optimize != .Debug,
+            .strip = optimize != .debug,
             .single_threaded = true,
         }),
     });

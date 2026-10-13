@@ -122,7 +122,7 @@ fn readFile(io: Io, allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const st = try Io.File.stat(file, io);
     var rbuf: [64 * 1024]u8 = undefined;
     var reader = Io.File.reader(file, io, &rbuf);
-    return std.Io.Reader.readAlloc(&reader.interface, allocator, st.size);
+    return std.Io.Reader.readAllocAll(&reader.interface, allocator, st.size);
 }
 
 // ---------------------------------------------------------------------------
